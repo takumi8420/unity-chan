@@ -73,6 +73,7 @@
     <Compile Include="Assets/UnityChan/Scripts/UnityChanControlScriptWithRgidBody.cs" />
     <Compile Include="Assets/UnityChan/Scripts/RandomWind.cs" />
     <Compile Include="Assets/UnityChan/Scripts/IKCtrlRightHand.cs" />
+    <Compile Include="Assets/UnityChan/Scripts/SerialReader.cs" />
     <Compile Include="Assets/UnityChan/Scripts/Rotator.cs" />
   </ItemGroup>
   <ItemGroup>

@@ -69,8 +69,8 @@ public class UnityChanController : MonoBehaviour
         }
         else if (Input.GetKey(KeyCode.E))
         {
-            targetRightUpperLegRotation = initialRightUpperLegRotation * Quaternion.Euler(45, 0, 0);
-            targetLeftUpperLegRotation = initialLeftUpperLegRotation * Quaternion.Euler(45, 0, 0);
+            targetRightUpperLegRotation = initialRightUpperLegRotation * Quaternion.Euler(0, 0, 45);
+            targetLeftUpperLegRotation = initialLeftUpperLegRotation * Quaternion.Euler(0, 0, 45);
         }
         else
         {

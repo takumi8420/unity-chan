@@ -68,6 +68,7 @@
     <Compile Include="Assets/UnityChan/Scripts/CameraController.cs" />
     <Compile Include="Assets/TutorialInfo/Scripts/Readme.cs" />
     <Compile Include="Assets/UnityChan/Scripts/SpringBone.cs" />
+    <Compile Include="Assets/UnityChan/Scripts/UnityChanController.cs" />
     <Compile Include="Assets/UnityChan/Scripts/FaceUpdate.cs" />
     <Compile Include="Assets/UnityChan/Scripts/UnityChanControlScriptWithRgidBody.cs" />
     <Compile Include="Assets/UnityChan/Scripts/RandomWind.cs" />

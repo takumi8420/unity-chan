@@ -1,98 +1,155 @@
+using System;
+using System.Text;
+using System.Net;
+using System.Net.Sockets;
+using System.Threading;
 using UnityEngine;
 
 public class UnityChanController : MonoBehaviour
 {
     private Animator animator;
 
-    // 初期回転を保存する
-    private Quaternion initialRightUpperArmRotation;
-    private Quaternion initialLeftUpperArmRotation;
-    private Quaternion initialRightUpperLegRotation;
-    private Quaternion initialLeftUpperLegRotation;
+    // UDP関連
+    private UdpClient udpClient;
+    private IPEndPoint remoteEndPoint;
+    private Thread receiveThread;
+    private bool isRunning = false;
 
-    // ターゲットの回転
-    private Quaternion targetRightUpperArmRotation;
-    private Quaternion targetLeftUpperArmRotation;
-    private Quaternion targetRightUpperLegRotation;
+    // 受信データ
+    private string latestReceivedData = null;
+    private object dataLock = new object();
+
+    // 左足だけ回転させる
+    private Quaternion initialLeftUpperLegRotation;
     private Quaternion targetLeftUpperLegRotation;
 
-    // 補間速度
     public float rotationSpeed = 5.0f;
+    public int listenPort = 12345;
+
+    // センサから回転への変換クラス
+    private SensorToRotationConverter converter;
 
     void Start()
     {
-        // Animatorコンポーネントを取得
         animator = GetComponent<Animator>();
 
-        // 各ボーンの初期回転を保存
-        initialRightUpperArmRotation = animator.GetBoneTransform(HumanBodyBones.RightUpperArm).localRotation;
-        initialLeftUpperArmRotation = animator.GetBoneTransform(HumanBodyBones.LeftUpperArm).localRotation;
-        initialRightUpperLegRotation = animator.GetBoneTransform(HumanBodyBones.RightUpperLeg).localRotation;
-        initialLeftUpperLegRotation = animator.GetBoneTransform(HumanBodyBones.LeftUpperLeg).localRotation;
+        // 左足の初期回転を取得
+        Transform leftLeg = animator.GetBoneTransform(HumanBodyBones.LeftUpperLeg);
+        if (leftLeg != null)
+        {
+            initialLeftUpperLegRotation = leftLeg.localRotation;
+            targetLeftUpperLegRotation = initialLeftUpperLegRotation; // 初期値を設定
+        }
+        else
+        {
+            Debug.LogError("[ERROR] LeftUpperLeg の Transform が見つかりません。");
+        }
 
-        // 初期のターゲット回転を設定
-        targetRightUpperArmRotation = initialRightUpperArmRotation;
-        targetLeftUpperArmRotation = initialLeftUpperArmRotation;
-        targetRightUpperLegRotation = initialRightUpperLegRotation;
-        targetLeftUpperLegRotation = initialLeftUpperLegRotation;
+        // センサ→回転変換クラスの初期化
+        converter = new SensorToRotationConverter();
+
+        // UDPクライアントのセットアップ
+        udpClient = new UdpClient(listenPort);
+        remoteEndPoint = new IPEndPoint(IPAddress.Any, listenPort);
+
+        Debug.Log($"[DEBUG] Listening on port {listenPort}");
+
+        StartReceiving();
+    }
+
+    private void StartReceiving()
+    {
+        isRunning = true;
+        receiveThread = new Thread(() =>
+        {
+            while (isRunning)
+            {
+                try
+                {
+                    byte[] data = udpClient.Receive(ref remoteEndPoint);
+                    string receivedData = Encoding.UTF8.GetString(data);
+                    lock (dataLock)
+                    {
+                        latestReceivedData = receivedData;
+                    }
+                    Debug.Log($"[DEBUG] データ受信: {receivedData}");
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"[ERROR] UDP受信エラー: {ex.Message}");
+                }
+            }
+        });
+        receiveThread.IsBackground = true;
+        receiveThread.Start();
     }
 
     void Update()
     {
-        // 腕の操作
-        if (Input.GetKey(KeyCode.W))
+        // 受信データを取り出す
+        string dataToProcess = null;
+        lock (dataLock)
         {
-            targetRightUpperArmRotation = initialRightUpperArmRotation * Quaternion.Euler(45, 0, 0);
-            targetLeftUpperArmRotation = initialLeftUpperArmRotation * Quaternion.Euler(45, 0, 0);
-        }
-        else if (Input.GetKey(KeyCode.A))
-        {
-            targetRightUpperArmRotation = initialRightUpperArmRotation * Quaternion.Euler(0, 45, 0);
-            targetLeftUpperArmRotation = initialLeftUpperArmRotation * Quaternion.Euler(0, -45, 0);
-        }
-        else
-        {
-            targetRightUpperArmRotation = initialRightUpperArmRotation;
-            targetLeftUpperArmRotation = initialLeftUpperArmRotation;
+            if (!string.IsNullOrEmpty(latestReceivedData))
+            {
+                dataToProcess = latestReceivedData;
+                latestReceivedData = null;
+            }
         }
 
-        // 足の操作
-        if (Input.GetKey(KeyCode.S))
+        // センサ値があればパースし、回転を更新
+        if (!string.IsNullOrEmpty(dataToProcess))
         {
-            targetRightUpperLegRotation = initialRightUpperLegRotation * Quaternion.Euler(-45, 0, 0);
-            targetLeftUpperLegRotation = initialLeftUpperLegRotation * Quaternion.Euler(-45, 0, 0);
-        }
-        else if (Input.GetKey(KeyCode.D))
-        {
-            targetRightUpperLegRotation = initialRightUpperLegRotation * Quaternion.Euler(0, 45, 0);
-            targetLeftUpperLegRotation = initialLeftUpperLegRotation * Quaternion.Euler(0, -45, 0);
-        }
-        else if (Input.GetKey(KeyCode.E))
-        {
-            targetRightUpperLegRotation = initialRightUpperLegRotation * Quaternion.Euler(0, 0, 45);
-            targetLeftUpperLegRotation = initialLeftUpperLegRotation * Quaternion.Euler(0, 0, 45);
-        }
-        else
-        {
-            targetRightUpperLegRotation = initialRightUpperLegRotation;
-            targetLeftUpperLegRotation = initialLeftUpperLegRotation;
+            string[] splits = dataToProcess.Split(',');
+            if (splits.Length == 2)
+            {
+                if (float.TryParse(splits[0], out float sensor1) &&
+                    float.TryParse(splits[1], out float sensor2))
+                {
+                    // 6点補間に基づきターゲット回転を取得
+                    Quaternion mappedRotation = converter.GetTargetRotation(sensor1, sensor2);
+                    Debug.Log($"[DEBUG] Mapped Rotation: {mappedRotation}");
+
+                    // 左足のターゲット回転 = 初期回転 × (マッピング結果)
+                    targetLeftUpperLegRotation = initialLeftUpperLegRotation * mappedRotation;
+                }
+                else
+                {
+                    Debug.LogWarning("[WARN] センサ値を float に変換できませんでした。");
+                }
+            }
+            else
+            {
+                Debug.LogWarning("[WARN] 受信データのフォーマットが正しくありません。");
+            }
         }
 
-        // 回転を適用
-        SmoothRotateBone(HumanBodyBones.RightUpperArm, targetRightUpperArmRotation);
-        SmoothRotateBone(HumanBodyBones.LeftUpperArm, targetLeftUpperArmRotation);
-        SmoothRotateBone(HumanBodyBones.RightUpperLeg, targetRightUpperLegRotation);
+        // 左足にスムーズに反映
         SmoothRotateBone(HumanBodyBones.LeftUpperLeg, targetLeftUpperLegRotation);
     }
 
     // ボーンを滑らかに回転させる
-    void SmoothRotateBone(HumanBodyBones bone, Quaternion targetRotation)
+    private void SmoothRotateBone(HumanBodyBones bone, Quaternion targetRotation)
     {
         Transform boneTransform = animator.GetBoneTransform(bone);
         if (boneTransform != null)
         {
-            // 現在の回転から目標回転へ補間
-            boneTransform.localRotation = Quaternion.Lerp(boneTransform.localRotation, targetRotation, rotationSpeed * Time.deltaTime);
+            Quaternion current = boneTransform.localRotation;
+            Quaternion newRotation = Quaternion.Lerp(current, targetRotation, rotationSpeed * Time.deltaTime);
+            boneTransform.localRotation = newRotation;
+        }
+    }
+
+    void OnApplicationQuit()
+    {
+        isRunning = false;
+        if (udpClient != null)
+        {
+            udpClient.Close();
+        }
+        if (receiveThread != null && receiveThread.IsAlive)
+        {
+            receiveThread.Join();
         }
     }
 }
